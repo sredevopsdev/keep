@@ -20,6 +20,8 @@ class Provider(SQLModel, table=True):
         sa_column=Column(JSON)
     )  # scope name is key and value is either True if validated or string with error message, e.g: {"read": True, "write": "error message"}
     consumer: bool = False
+    last_pull_time: Optional[datetime]
+    provisioned: bool = Field(default=False)
 
     class Config:
         orm_mode = True

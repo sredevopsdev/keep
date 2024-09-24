@@ -160,11 +160,16 @@ receivers:
 
     @staticmethod
     def _format_alert(
-        event: dict, provider_instance: Optional["PrometheusProvider"] = None
+        event: dict | list[AlertDto],
+        provider_instance: Optional["PrometheusProvider"] = None,
     ) -> list[AlertDto]:
         # TODO: need to support more than 1 alert per event
         alert_dtos = []
-        alerts = event.get("alerts", [event])
+        if isinstance(event, list):
+            return event
+        else:
+            alerts = event.get("alerts", [event])
+
         for alert in alerts:
             alert_id = alert.get("id", alert.get("labels", {}).get("alertname"))
             description = alert.get("annotations", {}).pop(
@@ -175,6 +180,7 @@ receivers:
             annotations = {
                 k.lower(): v for k, v in alert.pop("annotations", {}).items()
             }
+            service = labels.get("service", annotations.get("service", None))
             # map severity and status to keep's format
             status = alert.pop("state", None) or alert.pop("status", None)
             status = PrometheusProvider.STATUS_MAP.get(status, AlertStatus.FIRING)
@@ -186,6 +192,7 @@ receivers:
                 name=alert_id,
                 description=description,
                 status=status,
+                service=service,
                 lastReceived=datetime.datetime.now(
                     tz=datetime.timezone.utc
                 ).isoformat(),

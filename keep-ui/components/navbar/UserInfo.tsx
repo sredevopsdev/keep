@@ -13,9 +13,9 @@ import { AiOutlineRight } from "react-icons/ai";
 import { VscDebugDisconnect } from "react-icons/vsc";
 import DarkModeToggle from "app/dark-mode-toggle";
 import { useFloating } from "@floating-ui/react";
-import { Icon } from "@tremor/react";
+import { Icon, Subtitle } from "@tremor/react";
 
-const getInitials = (name: string) =>
+export const getInitials = (name: string) =>
   ((name.match(/(^\S\S?|\b\S)?/g) ?? []).join("").match(/(^\S|\S$)?/g) ?? [])
     .join("")
     .toUpperCase();
@@ -53,7 +53,7 @@ const UserDropdown = ({ session }: UserDropdownProps) => {
               </span>
             </span>
           )}{" "}
-          <span className="truncate">{name ?? email}</span>
+          <Subtitle className="truncate">{name ?? email}</Subtitle>
         </span>
 
         <Icon
@@ -81,7 +81,7 @@ const UserDropdown = ({ session }: UserDropdownProps) => {
               </Menu.Item>
             </li>
           )}
-          {configData?.AUTH_TYPE !== AuthenticationType.NO_AUTH && (
+          {configData?.AUTH_TYPE !== AuthenticationType.NOAUTH && (
             <li>
               <Menu.Item
                 as="button"

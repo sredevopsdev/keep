@@ -47,6 +47,7 @@ class GrafanaProviderAuthConfig:
 
 
 class GrafanaProvider(BaseProvider):
+    PROVIDER_DISPLAY_NAME = "Grafana"
     """Pull/Push alerts from Grafana."""
 
     KEEP_GRAFANA_WEBHOOK_INTEGRATION_NAME = "keep-grafana-webhook-integration"
@@ -207,13 +208,18 @@ class GrafanaProvider(BaseProvider):
             severity = GrafanaProvider.SEVERITIES_MAP.get(
                 labels.get("severity"), AlertSeverity.INFO
             )
-
+            service = alert.get("service", "unknown")
+            fingerprint = alert.get("fingerprint", alert.get("alertname", "") + service)
+            environment = labels.get(
+                "deployment_environment", labels.get("environment", "unknown")
+            )
             alert_dto = AlertDto(
                 id=alert.get("fingerprint"),
-                fingerprint=alert.get("fingerprint"),
+                fingerprint=fingerprint,
                 name=event.get("title"),
                 status=status,
                 severity=severity,
+                environment=environment,
                 lastReceived=datetime.datetime.now(
                     tz=datetime.timezone.utc
                 ).isoformat(),
@@ -504,7 +510,10 @@ class GrafanaProvider(BaseProvider):
         if not alert_type:
             alert_type = random.choice(list(ALERTS.keys()))
 
-        alert_payload = ALERTS[alert_type]["payload"]
+        if "payload" in ALERTS[alert_type]:
+            alert_payload = ALERTS[alert_type]["payload"]
+        else:
+            alert_payload = ALERTS[alert_type]["alerts"][0]
         alert_parameters = ALERTS[alert_type].get("parameters", {})
         # Generate random data for parameters
         for parameter, parameter_options in alert_parameters.items():

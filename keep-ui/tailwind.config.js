@@ -8,6 +8,10 @@ module.exports = {
   darkMode: "class",
   theme: {
     extend: {
+      gridTemplateColumns: {
+        20: "repeat(20, minmax(0, 1fr))",
+        24: "repeat(24, minmax(0, 1fr))",
+      },
       minHeight: {
         "screen-minus-200": "calc(100vh - 200px)",
       },
@@ -15,16 +19,16 @@ module.exports = {
         // light mode
         tremor: {
           brand: {
-            faint: "#eff6ff", // blue-50
-            muted: "#bfdbfe", // blue-200
-            subtle: "#60a5fa", // blue-400
-            DEFAULT: "#3b82f6", // blue-500
+            faint: "rgb(255 247 237)", // orange-50
+            muted: "rgb(255 237 213)", // orange-200
+            subtle: "rgb(251 146 60)", // orange-400
+            DEFAULT: "rgb(249 115 22)", // orange-500
             emphasis: "#1d4ed8", // blue-700
             inverted: "#ffffff", // white
           },
           background: {
             muted: "#f9fafb", // gray-50
-            subtle: "#f3f4f6", // gray-100
+            subtle: "rgb(255 237 213)", // orange-200
             DEFAULT: "#ffffff", // white
             emphasis: "#374151", // gray-700
           },
@@ -35,10 +39,10 @@ module.exports = {
             DEFAULT: "#e5e7eb", // gray-200
           },
           content: {
-            subtle: "#9ca3af", // gray-400
-            DEFAULT: "#6b7280", // gray-500
-            emphasis: "#374151", // gray-700
-            strong: "#111827", // gray-900
+            subtle: "#646464", // Custom black-400 (light black)
+            DEFAULT: "#333333", // Custom black-500 (standard black)
+            emphasis: "#1a1a1a", // Custom black-700 (darker black)
+            strong: "#000000", // Custom black-900 (the darkest black)
             inverted: "#ffffff", // white
           },
         },
@@ -129,5 +133,8 @@ module.exports = {
         /^(fill-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|100|200|300|400|500|600|700|800|900|950))$/,
     },
   ],
-  plugins: [require("@headlessui/tailwindcss"), require('@tailwindcss/typography')],
+  plugins: [
+    require("@headlessui/tailwindcss"),
+    require("@tailwindcss/typography"),
+  ],
 };

@@ -13,23 +13,15 @@ export default function Extraction() {
   const [extractionToEdit, setExtractionToEdit] =
     useState<ExtractionRule | null>(null);
   return (
-    <Card className="p-4 md:p-10 mx-auto">
-      <Badge
-        color="orange"
-        size="xs"
-        tooltip="Slack us if something isn't working properly :)"
-        className="absolute top-[-10px] left-[-10px]"
-      >
-        Beta
-      </Badge>
+    <Card className="mt-10 p-4 md:p-10 mx-auto">
       <div className="flex divide-x p-2">
-        <div className="w-2/3 pr-2.5">
+        <div className="w-1/3 pr-2.5">
           <CreateOrUpdateExtractionRule
             extractionToEdit={extractionToEdit}
             editCallback={setExtractionToEdit}
           />
         </div>
-        <div className="w-1/3 pl-2.5">
+        <div className="w-2/3 pl-2.5">
           {isLoading ? (
             <Loading />
           ) : extractions && extractions.length > 0 ? (
@@ -43,11 +35,8 @@ export default function Extraction() {
               title="Extraction rules does not exist"
               icon={MdWarning}
             >
-              <p className="text-slate-400">No extraction rules found.</p>
-              <p className="text-slate-400">
-                Configure new extraction rule using the extration rules wizard
-                to the left.
-              </p>
+              No extraction rules found. Configure new extraction rule using the
+              extration rules wizard to the left.
             </Callout>
           )}
         </div>

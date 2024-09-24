@@ -150,6 +150,11 @@ export default function AlertTriggerModal({
       }
     });
 
+    // Add staticFields to the payload
+    staticFields.forEach((field) => {
+      buildNestedObject(payload, field.key, field.value);
+    });
+
     // Add fingerprint key with a random number
     const randomNum = Math.floor(Math.random() * 1000000);
     payload["fingerprint"] = `test-workflow-fingerprint-${randomNum}`;
@@ -161,16 +166,17 @@ export default function AlertTriggerModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Build Alert Payload">
       <form onSubmit={handleSubmit}>
-        <Card className="mb-4">
-          <Text className="mb-2">Fields Defined As Workflow Filters</Text>
-          {Array.isArray(staticFields) &&
-            staticFields.map((field, index) => (
+        {Array.isArray(staticFields) && staticFields.length > 0 && (
+          <Card className="mb-4">
+            <Text className="mb-2">Fields Defined As Workflow Filters</Text>
+            {staticFields.map((field, index) => (
               <div key={field.key} className="flex gap-2 mb-2">
                 <TextInput placeholder="Key" value={field.key} disabled />
                 <TextInput placeholder="Value" value={field.value} disabled />
               </div>
             ))}
-        </Card>
+          </Card>
+        )}
 
         <Card className="mb-4">
           <Text className="mb-2">

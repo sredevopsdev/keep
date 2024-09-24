@@ -1,14 +1,10 @@
-import hashlib
-import importlib
 import os
-import sys
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from keep.api.core.dependencies import SINGLE_TENANT_UUID
-from keep.api.models.db.tenant import TenantApiKey
+from tests.fixtures.client import client, setup_api_key, test_app  # noqa
 
 MOCK_TOKEN = "MOCKTOKEN"
 
@@ -30,53 +26,19 @@ def mock_get_signing_key_from_jwt(token):
     return MockSigningKey(key="mock_key")
 
 
-@pytest.fixture
-def test_app(monkeypatch, request):
-    auth_type = request.param
-    monkeypatch.setenv("AUTH_TYPE", auth_type)
-    monkeypatch.setenv("KEEP_JWT_SECRET", "somesecret")
-    # Ok this is bit complex so stay with me:
-    #   We need to reload the app to make sure the AuthVerifier is instantiated with the correct environment variable
-    #   However, we can't just reload the module because the app is instantiated in the get_app() function
-    #    So we need to delete the module from sys.modules and re-import it
-
-    # First, delete all the routes modules from sys.modules
-    for module in list(sys.modules):
-        if module.startswith("keep.api.routes"):
-            del sys.modules[module]
-    # Second, delete the api module from sys.modules
-    if "keep.api.api" in sys.modules:
-        importlib.reload(sys.modules["keep.api.api"])
-
-    # Now, import it, and it will re-instantiate the app with the correct environment variable
-    from keep.api.api import get_app
-
-    # Finally, return the app
-    app = get_app()
-    return app
-
-
-# Fixture for TestClient using the test_app fixture
-@pytest.fixture
-def client(test_app, db_session, monkeypatch):
-    # disable pusher
-    monkeypatch.setenv("PUSHER_DISABLED", "true")
-    return TestClient(test_app)
-
-
 def get_mock_jwt_payload(token, *args, **kwargs):
     auth_type = os.getenv("AUTH_TYPE")
     if token != MOCK_TOKEN:
         raise Exception("Invalid token")
     if auth_type == "SINGLE_TENANT":
         return {
-            "keep_tenant_id": SINGLE_TENANT_UUID,
+            "tenant_id": SINGLE_TENANT_UUID,
             "keep_role": "admin",
             "email": "admin@single-tenant.com",
         }
     elif auth_type == "MULTI_TENANT":
         return {
-            "tenant_id": "multi-tenant-id",
+            "keep_tenant_id": "multi-tenant-id",
             "role": "admin",
             "email": "admin@multi-tenant.com",
         }
@@ -88,27 +50,10 @@ def get_mock_jwt_payload(token, *args, **kwargs):
         return {}
 
 
-# Common setup for tests
-def setup_api_key(
-    db_session, api_key_value, tenant_id=SINGLE_TENANT_UUID, role="admin"
-):
-    hash_api_key = hashlib.sha256(api_key_value.encode()).hexdigest()
-    db_session.add(
-        TenantApiKey(
-            tenant_id=tenant_id,
-            reference_id="test_api_key",
-            key_hash=hash_api_key,
-            created_by="admin@keephq",
-            role=role,
-        )
-    )
-    db_session.commit()
-
-
 @pytest.mark.parametrize(
     "test_app", ["SINGLE_TENANT", "MULTI_TENANT", "NO_AUTH"], indirect=True
 )
-def test_api_key_with_header(client, db_session, test_app):
+def test_api_key_with_header(db_session, client, test_app):
     """Tests the API key authentication with the x-api-key/digest"""
     auth_type = os.getenv("AUTH_TYPE")
     valid_api_key = "valid_api_key"
@@ -150,7 +95,7 @@ def test_api_key_with_header(client, db_session, test_app):
 @pytest.mark.parametrize(
     "test_app", ["SINGLE_TENANT", "MULTI_TENANT", "NO_AUTH"], indirect=True
 )
-def test_bearer_token(client, db_session, test_app):
+def test_bearer_token(db_session, client, test_app):
     """Tests the bearer token authentication"""
     auth_type = os.getenv("AUTH_TYPE")
     # Test bearer tokens
@@ -176,7 +121,7 @@ def test_bearer_token(client, db_session, test_app):
 @pytest.mark.parametrize(
     "test_app", ["SINGLE_TENANT", "MULTI_TENANT", "NO_AUTH"], indirect=True
 )
-def test_webhook_api_key(client, db_session, test_app):
+def test_webhook_api_key(db_session, client, test_app):
     """Tests the webhook API key authentication"""
     auth_type = os.getenv("AUTH_TYPE")
     valid_api_key = "valid_api_key"
@@ -184,7 +129,7 @@ def test_webhook_api_key(client, db_session, test_app):
     response = client.post(
         "/alerts/event/grafana", json={}, headers={"x-api-key": valid_api_key}
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
 
     response = client.post(
         "/alerts/event/grafana", json={}, headers={"x-api-key": "invalid_api_key"}
@@ -196,25 +141,162 @@ def test_webhook_api_key(client, db_session, test_app):
         json={},
         headers={"Authorization": f"Digest {valid_api_key}"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
 
     response = client.post(
         "/alerts/event/grafana",
         json={},
         headers={"authorization": f"digest {valid_api_key}"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
 
     response = client.post(
         "/alerts/event/grafana",
         json={},
         headers={"authorization": "digest invalid_api_key"},
     )
-    assert response.status_code == 401 if auth_type != "NO_AUTH" else 200
+    assert response.status_code == 401 if auth_type != "NO_AUTH" else 202
 
     response = client.post(
         "/alerts/event/grafana",
         json={},
         headers={"Authorization": "digest invalid_api_key"},
     )
-    assert response.status_code == 401 if auth_type != "NO_AUTH" else 200
+    assert response.status_code == 401 if auth_type != "NO_AUTH" else 202
+
+
+# sanity check with keycloak
+@pytest.mark.parametrize("test_app", ["KEYCLOAK"], indirect=True)
+def test_keycloak_sanity(db_session, keycloak_client, keycloak_token, client, test_app):
+    """Tests the keycloak sanity check"""
+    # Use the token to make a request to the Keep API
+    headers = {"Authorization": f"Bearer {keycloak_token}"}
+    response = client.get("/providers", headers=headers)
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "test_app",
+    [
+        {"AUTH_TYPE": "SINGLE_TENANT", "KEEP_IMPERSONATION_ENABLED": "true"},
+    ],
+    indirect=True,
+)
+def test_api_key_impersonation_without_admin(db_session, client, test_app):
+    """Tests the API key impersonation with different environment settings"""
+
+    valid_api_key = "valid_admin_api_key"
+    setup_api_key(db_session, valid_api_key, role="noc")
+    response = client.get(
+        "/providers",
+        headers={
+            "x-api-key": valid_api_key,
+            "X-KEEP-USER": "testuser",
+            "X-KEEP-ROLE": "noc",
+        },
+    )
+    assert response.status_code == 401
+    # check the message in the response
+    assert response.json()["detail"] == "Impersonation not allowed for non-admin users"
+
+
+@pytest.mark.parametrize(
+    "test_app",
+    [
+        {"AUTH_TYPE": "SINGLE_TENANT", "KEEP_IMPERSONATION_ENABLED": "true"},
+    ],
+    indirect=True,
+)
+def test_api_key_impersonation_without_user_provision(db_session, client, test_app):
+    """Tests the API key impersonation with different environment settings"""
+
+    valid_api_key = "valid_admin_api_key"
+    setup_api_key(db_session, valid_api_key, role="admin")
+    response = client.get(
+        "/providers",
+        headers={
+            "x-api-key": valid_api_key,
+            "X-KEEP-USER": "testuser",
+            "X-KEEP-ROLE": "admin",
+        },
+    )
+    assert response.status_code == 200
+
+    # user should not be provisioned
+    response = client.get("/auth/users", headers={"x-api-key": valid_api_key})
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.parametrize(
+    "test_app",
+    [
+        {
+            "AUTH_TYPE": "SINGLE_TENANT",
+            "KEEP_IMPERSONATION_ENABLED": "true",
+            "KEEP_IMPERSONATION_AUTO_PROVISION": "true",
+        },
+    ],
+    indirect=True,
+)
+def test_api_key_impersonation_with_user_provision(db_session, client, test_app):
+    """Tests the API key impersonation with different environment settings"""
+
+    valid_api_key = "valid_admin_api_key"
+    setup_api_key(db_session, valid_api_key, role="admin")
+    response = client.get(
+        "/providers",
+        headers={
+            "x-api-key": valid_api_key,
+            "X-KEEP-USER": "testuser",
+            "X-KEEP-ROLE": "admin",
+        },
+    )
+    assert response.status_code == 200
+
+    # check that the user exists now
+    response = client.get("/auth/users", headers={"x-api-key": valid_api_key})
+    assert response.status_code == 200
+    assert response.json()[0].get("email") == "testuser"
+
+
+@pytest.mark.parametrize(
+    "test_app",
+    [
+        {
+            "AUTH_TYPE": "SINGLE_TENANT",
+            "KEEP_IMPERSONATION_ENABLED": "true",
+            "KEEP_IMPERSONATION_AUTO_PROVISION": "true",
+        },
+    ],
+    indirect=True,
+)
+def test_api_key_impersonation_provisioned_user_cant_login(
+    db_session, client, test_app
+):
+    """Tests the API key impersonation with different environment settings"""
+
+    valid_api_key = "valid_admin_api_key"
+    setup_api_key(db_session, valid_api_key, role="admin")
+    response = client.get(
+        "/providers",
+        headers={
+            "x-api-key": valid_api_key,
+            "X-KEEP-USER": "testuser",
+            "X-KEEP-ROLE": "admin",
+        },
+    )
+    assert response.status_code == 200
+
+    # check that the user exists now
+    response = client.get("/auth/users", headers={"x-api-key": valid_api_key})
+    assert response.status_code == 200
+    assert response.json()[0].get("email") == "testuser"
+
+    # try to login with the user
+    response = client.post(
+        "/signin",
+        json={"username": "testuser", "password": ""},
+    )
+    assert response.status_code == 401
+    assert response.json()["message"] == "Empty password"

@@ -20,8 +20,10 @@ interface Props {
   enableGenerate: (state: boolean) => void;
   triggerGenerate: number;
   triggerSave: number;
+  triggerRun: number;
   workflow?: string;
   workflowId?: string;
+  isPreview?:boolean;
 }
 
 export function BuilderCard({
@@ -31,9 +33,11 @@ export function BuilderCard({
   enableButtons,
   enableGenerate,
   triggerGenerate,
+  triggerRun,
   triggerSave,
   workflow,
   workflowId,
+  isPreview
 }: Props) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [installedProviders, setInstalledProviders] = useState<
@@ -46,7 +50,8 @@ export function BuilderCard({
   if (error) {
     throw new KeepApiError(
       "The builder has failed to load providers",
-      `${apiUrl}/providers`
+      `${apiUrl}/providers`,
+        `Failed to query ${apiUrl}/providers, is Keep API up?`
     );
   }
 
@@ -66,7 +71,7 @@ export function BuilderCard({
     );
 
   return (
-    <Card className={`mt-10 p-4 md:p-10 mx-auto ${error ? null : "h-5/6"}`}>
+    <Card className={`mt-2 p-4 md:p-2 mx-auto ${error ? null : "h-[95%]"}`}>
       {error ? (
         <Callout
           className="mt-4"
@@ -87,9 +92,11 @@ export function BuilderCard({
           enableGenerate={enableGenerate}
           triggerGenerate={triggerGenerate}
           triggerSave={triggerSave}
+          triggerRun={triggerRun}
           workflow={workflow}
           accessToken={accessToken}
           workflowId={workflowId}
+          isPreview={isPreview}
         />
       )}
     </Card>

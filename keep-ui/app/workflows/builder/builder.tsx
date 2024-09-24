@@ -1,20 +1,5 @@
-import "sequential-workflow-designer/css/designer.css";
-import "sequential-workflow-designer/css/designer-light.css";
-import "sequential-workflow-designer/css/designer-dark.css";
 import "./page.css";
-import {
-  Definition,
-  StepsConfiguration,
-  ValidatorConfiguration,
-  Step,
-  Sequence,
-} from "sequential-workflow-designer";
-import {
-  SequentialWorkflowDesigner,
-  wrapDefinition,
-} from "sequential-workflow-designer-react";
 import { useEffect, useState } from "react";
-import StepEditor, { GlobalEditor } from "./editors";
 import { Callout, Card } from "@tremor/react";
 import { Provider } from "../../providers/providers";
 import {
@@ -22,12 +7,13 @@ import {
   generateWorkflow,
   getToolboxConfiguration,
   buildAlert,
+  wrapDefinitionV2,
 } from "./utils";
 import {
   CheckCircleIcon,
   ExclamationCircleIcon,
 } from "@heroicons/react/20/solid";
-import { globalValidator, stepValidator } from "./builder-validators";
+import { globalValidatorV2, stepValidatorV2 } from "./builder-validators";
 import Modal from "react-modal";
 import { Alert } from "./alert";
 import BuilderModalContent from "./builder-modal";
@@ -36,6 +22,12 @@ import Loader from "./loader";
 import { stringify } from "yaml";
 import { useSearchParams } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
+import BuilderWorkflowTestRunModalContent from "./builder-workflow-testrun-modal";
+import { WorkflowExecution, WorkflowExecutionFailure } from "./types";
+import ReactFlowBuilder from "./ReactFlowBuilder";
+import { ReactFlowProvider } from "@xyflow/react";
+import useStore, { ReactFlowDefinition, V2Step, Definition as FlowDefinition } from "./builder-store";
+import { toast } from "react-toastify";
 
 interface Props {
   loadedAlertFile: string | null;
@@ -44,10 +36,12 @@ interface Props {
   enableGenerate: (status: boolean) => void;
   triggerGenerate: number;
   triggerSave: number;
+  triggerRun: number;
   workflow?: string;
   workflowId?: string;
   accessToken?: string;
   installedProviders?: Provider[] | undefined | null;
+  isPreview?: boolean;
 }
 
 function Builder({
@@ -57,13 +51,16 @@ function Builder({
   enableGenerate,
   triggerGenerate,
   triggerSave,
+  triggerRun,
   workflow,
   workflowId,
   accessToken,
   installedProviders,
+  isPreview,
 }: Props) {
+
   const [definition, setDefinition] = useState(() =>
-    wrapDefinition({ sequence: [], properties: {} } as Definition)
+    wrapDefinitionV2({ sequence: [], properties: {}, isValid: false })
   );
   const [isLoading, setIsLoading] = useState(true);
   const [stepValidationError, setStepValidationError] = useState<string | null>(
@@ -72,10 +69,31 @@ function Builder({
   const [globalValidationError, setGlobalValidationError] = useState<
     string | null
   >(null);
-  const [modalIsOpen, setIsOpen] = useState(false);
+  const [generateModalIsOpen, setGenerateModalIsOpen] = useState(false);
+  const [testRunModalOpen, setTestRunModalOpen] = useState(false);
+  const [runningWorkflowExecution, setRunningWorkflowExecution] = useState<
+    WorkflowExecution | WorkflowExecutionFailure | null
+  >(null);
   const [compiledAlert, setCompiledAlert] = useState<Alert | null>(null);
 
   const searchParams = useSearchParams();
+  const { errorNode, setErrorNode, canDeploy, synced } = useStore();
+
+  const setStepValidationErrorV2 = (step: V2Step, error: string | null) => {
+    setStepValidationError(error);
+    if (error && step) {
+      return setErrorNode(step.id)
+    }
+    setErrorNode(null);
+  }
+
+  const setGlobalValidationErrorV2 = (id:string|null, error: string | null) => {
+    setGlobalValidationError(error);
+    if (error && id) {
+      return setErrorNode(id)
+    }
+    setErrorNode(null);
+  }
 
   const updateWorkflow = () => {
     const apiUrl = getApiURL();
@@ -99,9 +117,42 @@ function Builder({
       });
   };
 
+  const testRunWorkflow = () => {
+    const apiUrl = getApiURL();
+    const url = `${apiUrl}/workflows/test`;
+    const method = "POST";
+    const headers = {
+      "Content-Type": "text/html",
+      Authorization: `Bearer ${accessToken}`,
+    };
+
+    setTestRunModalOpen(true);
+    const body = stringify(buildAlert(definition.value));
+    fetch(url, { method, headers, body })
+      .then((response) => {
+        if (response.ok) {
+          response.json().then((data) => {
+            setRunningWorkflowExecution({
+              ...data,
+            });
+          });
+        } else {
+          response.json().then((data) => {
+            setRunningWorkflowExecution({
+              error: data?.detail ?? "Unknown error",
+            });
+          });
+        }
+      })
+      .catch((error) => {
+        alert(`Error: ${error}`);
+        setTestRunModalOpen(false);
+      });
+  };
+
   const addWorkflow = () => {
     const apiUrl = getApiURL();
-    const url = `${apiUrl}/workflows`;
+    const url = `${apiUrl}/workflows/json`;
     const method = "POST";
     const headers = {
       "Content-Type": "text/html",
@@ -126,7 +177,7 @@ function Builder({
   useEffect(() => {
     setIsLoading(true);
     if (workflow) {
-      setDefinition(wrapDefinition(parseWorkflow(workflow, providers)));
+      setDefinition(wrapDefinitionV2({...parseWorkflow(workflow, providers), isValid:true}));
     } else if (loadedAlertFile == null) {
       const alertUuid = uuidv4();
       const alertName = searchParams?.get("alertName");
@@ -136,19 +187,10 @@ function Builder({
         triggers = { alert: { source: alertSource, name: alertName } };
       }
       setDefinition(
-        wrapDefinition(
-          generateWorkflow(
-            alertUuid,
-            "",
-            "",
-            [],
-            [],
-            triggers
-          )
-        )
+        wrapDefinitionV2({...generateWorkflow(alertUuid, "", "", false,[], [], triggers), isValid: true})
       );
     } else {
-      setDefinition(wrapDefinition(parseWorkflow(loadedAlertFile!, providers)));
+      setDefinition(wrapDefinitionV2({...parseWorkflow(loadedAlertFile!, providers), isValid:true}));
     }
     setIsLoading(false);
   }, [loadedAlertFile, workflow, searchParams]);
@@ -156,13 +198,25 @@ function Builder({
   useEffect(() => {
     if (triggerGenerate) {
       setCompiledAlert(buildAlert(definition.value));
-      if (!modalIsOpen) setIsOpen(true);
+      if (!generateModalIsOpen) setGenerateModalIsOpen(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerGenerate]);
 
   useEffect(() => {
+    if (triggerRun) {
+      testRunWorkflow();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerRun]);
+
+  useEffect(() => {
+ 
     if (triggerSave) {
+      if(!synced) {
+        toast('Please save the previous step or wait while properties sync with the workflow.');
+        return;
+      }
       if (workflowId) {
         updateWorkflow();
       } else {
@@ -172,8 +226,27 @@ function Builder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerSave]);
 
+  useEffect(()=>{
+    if (canDeploy && !errorNode && definition.isValid) {
+      if(!synced) {
+        toast('Please save the previous step or wait while properties sync with the workflow.');
+        return;
+      }
+      if (workflowId) {
+        updateWorkflow();
+      } else {
+        addWorkflow();
+      }
+    }
+  }, [canDeploy, errorNode, definition?.isValid])
+
   useEffect(() => {
-    enableGenerate(definition.isValid && stepValidationError === null && globalValidationError === null || false);
+    enableGenerate(
+      (definition.isValid &&
+        stepValidationError === null &&
+        globalValidationError === null) ||
+      false
+    );
   }, [
     stepValidationError,
     globalValidationError,
@@ -189,95 +262,100 @@ function Builder({
     );
   }
 
-  function IconUrlProvider(componentType: string, type: string): string | null {
-    if (type === "alert" || type === "workflow") return "/keep.png";
-    return `/icons/${type
-      .replace("step-", "")
-      .replace("action-", "")
-      .replace("condition-", "")}-icon.png`;
-  }
 
-  function CanDeleteStep(step: Step, parentSequence: Sequence): boolean {
-    return !step.properties["isLocked"];
-  }
-
-  function IsStepDraggable(step: Step, parentSequence: Sequence): boolean {
-    return CanDeleteStep(step, parentSequence);
-  }
-
-  function CanMoveStep(
-    sourceSequence: any,
-    step: any,
-    targetSequence: Sequence,
-    targetIndex: number
-  ): boolean {
-    return CanDeleteStep(step, sourceSequence);
-  }
-
-  const validatorConfiguration: ValidatorConfiguration = {
+  const ValidatorConfigurationV2: {
+    step: (step: V2Step,
+      parent?: V2Step,
+      definition?: ReactFlowDefinition) => boolean;
+    root: (def: FlowDefinition) => boolean;
+  } = {
     step: (step, parent, definition) =>
-      stepValidator(step, parent, definition, setStepValidationError),
-    root: (def) => globalValidator(def, setGlobalValidationError),
-  };
-
-  const stepsConfiguration: StepsConfiguration = {
-    iconUrlProvider: IconUrlProvider,
-    canDeleteStep: CanDeleteStep,
-    canMoveStep: CanMoveStep,
-    isDraggable: IsStepDraggable,
-  };
-
-  function closeModal() {
-    setIsOpen(false);
+      stepValidatorV2(step, setStepValidationErrorV2, parent, definition),
+    root: (def) => globalValidatorV2(def, setGlobalValidationErrorV2),
   }
+
+  function closeGenerateModal() {
+    setGenerateModalIsOpen(false);
+  }
+
+  const closeWorkflowExecutionResultsModal = () => {
+    setTestRunModalOpen(false);
+    setRunningWorkflowExecution(null);
+  };
+
+  const getworkflowStatus = () => {
+    return stepValidationError || globalValidationError ? (
+      <Callout
+        className="mt-2.5 mb-2.5"
+        title="Validation Error"
+        icon={ExclamationCircleIcon}
+        color="rose"
+      >
+        {stepValidationError || globalValidationError}
+      </Callout>
+    ) : (
+      <Callout
+        className="mt-2.5 mb-2.5"
+        title="Schema Valid"
+        icon={CheckCircleIcon}
+        color="teal"
+      >
+        Alert can be generated successfully
+      </Callout>
+    );
+  };
 
   return (
-    <>
+    <div className="h-full">
       <Modal
-        onRequestClose={closeModal}
-        isOpen={modalIsOpen}
+        onRequestClose={closeGenerateModal}
+        isOpen={generateModalIsOpen}
         className="bg-gray-50 p-4 md:p-10 mx-auto max-w-7xl mt-20 border border-orange-600/50 rounded-md"
       >
         <BuilderModalContent
-          closeModal={closeModal}
+          closeModal={closeGenerateModal}
           compiledAlert={compiledAlert}
         />
       </Modal>
-      {modalIsOpen ? null : (
+      <Modal
+        isOpen={testRunModalOpen}
+        onRequestClose={closeWorkflowExecutionResultsModal}
+        className="bg-gray-50 p-4 md:p-10 mx-auto max-w-7xl mt-20 border border-orange-600/50 rounded-md"
+      >
+        <BuilderWorkflowTestRunModalContent
+          closeModal={closeWorkflowExecutionResultsModal}
+          workflowExecution={runningWorkflowExecution}
+        />
+      </Modal>
+      {generateModalIsOpen || testRunModalOpen ? null : (
         <>
-          {stepValidationError || globalValidationError ? (
-            <Callout
-              className="mt-2.5 mb-2.5"
-              title="Validation Error"
-              icon={ExclamationCircleIcon}
-              color="rose"
-            >
-              {stepValidationError || globalValidationError}
-            </Callout>
-          ) : (
-            <Callout
-              className="mt-2.5 mb-2.5"
-              title="Schema Valid"
-              icon={CheckCircleIcon}
-              color="teal"
-            >
-              Alert can be generated successfully
-            </Callout>
-          )}
-          <SequentialWorkflowDesigner
-            definition={definition}
-            onDefinitionChange={setDefinition}
-            stepsConfiguration={stepsConfiguration}
-            validatorConfiguration={validatorConfiguration}
-            toolboxConfiguration={getToolboxConfiguration(providers)}
-            undoStackSize={10}
-            controlBar={true}
-            globalEditor={<GlobalEditor />}
-            stepEditor={<StepEditor installedProviders={installedProviders} />}
-          />
+          {getworkflowStatus()}
+          <div className="h-[94%]">
+            <ReactFlowProvider>
+              <ReactFlowBuilder
+                providers={providers}
+                installedProviders={installedProviders}
+                definition={definition}
+                validatorConfiguration={ValidatorConfigurationV2}
+                onDefinitionChange={(def: any) => {
+                  setDefinition({
+                    value: {
+                      sequence: def?.sequence || [],
+                      properties
+                        : def?.
+                          properties
+                        || {}
+                    }, isValid: def?.isValid || false
+                  })
+                }
+                }
+                toolboxConfiguration={getToolboxConfiguration(providers)}
+              />
+            </ReactFlowProvider>
+          </div>
         </>
       )}
-    </>
+    </div>
   );
 }
 

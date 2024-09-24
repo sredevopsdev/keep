@@ -47,6 +47,7 @@ class SquadcastProviderAuthConfig:
 class SquadcastProvider(BaseProvider):
     """Create incidents and notes using the Squadcast API."""
 
+    PROVIDER_DISPLAY_NAME = "Squadcast"
     PROVIDER_TAGS = ["alert"]
 
     PROVIDER_SCOPES = [
@@ -114,6 +115,7 @@ class SquadcastProvider(BaseProvider):
         headers: dict,
         message: str,
         description: str,
+        tags: dict = {},
         priority: str = "",
         status: str = "",
         event_id: str = "",
@@ -123,6 +125,7 @@ class SquadcastProvider(BaseProvider):
             {
                 "message": message,
                 "description": description,
+                "tags": tags,
                 "priority": priority,
                 "status": status,
                 "event_id": event_id,
@@ -153,6 +156,7 @@ class SquadcastProvider(BaseProvider):
         description: str = "",
         incident_id: str = "",
         priority: str = "",
+        tags: dict = {},
         status: str = "",
         event_id: str = "",
         attachments: list = [],
@@ -187,6 +191,7 @@ class SquadcastProvider(BaseProvider):
                 headers=headers,
                 message=message,
                 description=description,
+                tags=tags,
                 priority=priority,
                 status=status,
                 event_id=event_id,

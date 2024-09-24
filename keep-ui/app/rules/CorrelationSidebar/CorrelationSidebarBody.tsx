@@ -11,13 +11,15 @@ import { useSession } from "next-auth/react";
 import { useRules } from "utils/hooks/useRules";
 import { CorrelationForm as CorrelationFormType } from ".";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchAlerts } from "utils/hooks/useSearchAlerts";
+import {AlertsFoundBadge} from "./AlertsFoundBadge";
 
-const TIMEFRAME_UNITS: Record<string, (amount: number) => number> = {
-  seconds: (amount) => amount,
-  minutes: (amount) => 60 * amount,
-  hours: (amount) => 3600 * amount,
-  days: (amount) => 86400 * amount,
-};
+export const TIMEFRAME_UNITS_TO_SECONDS= {
+  seconds: (amount: number) => amount,
+  minutes: (amount: number) => 60 * amount,
+  hours: (amount: number) => 3600 * amount,
+  days: (amount: number) => 86400 * amount,
+} as const;
 
 type CorrelationSidebarBodyProps = {
   toggle: VoidFunction;
@@ -30,6 +32,14 @@ export const CorrelationSidebarBody = ({
 }: CorrelationSidebarBodyProps) => {
   const apiUrl = getApiURL();
 
+  const methods = useForm<CorrelationFormType>({
+    defaultValues: defaultValue,
+    mode: "onChange",
+  });
+  const timeframeInSeconds = methods.watch("timeUnit") ? TIMEFRAME_UNITS_TO_SECONDS[methods.watch("timeUnit")](
+    +methods.watch("timeAmount")
+  ) : 0;
+
   const { mutate } = useRules();
   const { data: session } = useSession();
 
@@ -37,20 +47,26 @@ export const CorrelationSidebarBody = ({
   const searchParams = useSearchParams();
   const selectedId = searchParams ? searchParams.get("id") : null;
 
+  const { data: alertsFound = [], isLoading } = useSearchAlerts({
+    query: methods.watch("query"),
+    timeframe: timeframeInSeconds,
+  });
+
   const [isCalloutShown, setIsCalloutShown] = useLocalStorage(
     "correlation-callout",
     true
   );
 
-  const methods = useForm<CorrelationFormType>({ defaultValues: defaultValue });
-
   const onCorrelationFormSubmit: SubmitHandler<CorrelationFormType> = async (
     correlationFormData
   ) => {
-    const { name, query, description, timeUnit, timeAmount } =
-      correlationFormData;
-
-    const timeframeInSeconds = TIMEFRAME_UNITS[timeUnit](+timeAmount);
+    const {
+      name,
+      query,
+      timeUnit,
+      description,
+      groupedAttributes,
+      requireApprove } = correlationFormData;
 
     if (session) {
       const response = await fetch(
@@ -67,6 +83,9 @@ export const CorrelationSidebarBody = ({
             ruleName: name,
             celQuery: formatQuery(query, "cel"),
             timeframeInSeconds,
+            timeUnit: timeUnit,
+            groupingCriteria: alertsFound.length ? groupedAttributes : [],
+            requireApprove: requireApprove
           }),
         }
       );
@@ -83,7 +102,7 @@ export const CorrelationSidebarBody = ({
     <div className="space-y-4 pt-10 flex flex-col flex-1">
       {isCalloutShown && (
         <Callout
-          className="mb-10 relative"
+          className="relative"
           title="What is alert correlations? and why grouping alerts together can ease your work"
           color="teal"
         >
@@ -103,12 +122,32 @@ export const CorrelationSidebarBody = ({
       )}
       <FormProvider {...methods}>
         <form
-          className="grid grid-cols-2 gap-x-10 flex-1"
+          // className="grid grid-cols-1 xl:grid-cols-2 gap-x-10 flex-2"
           onSubmit={methods.handleSubmit(onCorrelationFormSubmit)}
         >
-          <CorrelationForm />
-          <CorrelationGroups />
-          <CorrelationSubmission toggle={toggle} />
+          <div className="mb-10">
+            <CorrelationForm alertsFound={alertsFound} isLoading={isLoading} />
+          </div>
+          <div className="grid grid-cols-3 gap-x-10 flex-1">
+            <CorrelationGroups />
+
+            <div className="flex flex-col items-center justify-between gap-5 py-5" id="total-results">
+              <div className="grow justify-center flex">
+                {alertsFound.length > 0 && (
+                  <AlertsFoundBadge alertsFound={alertsFound} isLoading={false} vertical={true}/>
+                )}
+              </div>
+              <span className="text-xs">Rules will be applied only to new alerts. Historical data will be ignored</span>
+              <div className="flex justify-end w-full">
+                <CorrelationSubmission
+                  toggle={toggle}
+                  timeframeInSeconds={timeframeInSeconds}
+                />
+              </div>
+            </div>
+
+          </div>
+
         </form>
       </FormProvider>
     </div>

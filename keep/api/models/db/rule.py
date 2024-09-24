@@ -21,6 +21,7 @@ class Rule(SQLModel, table=True):
     definition: dict = Field(sa_column=Column(JSON))  # sql / params
     definition_cel: str  # cel
     timeframe: int  # time in seconds
+    timeunit: str = Field(default="seconds")
     created_by: str
     creation_time: datetime
     updated_by: str = None
@@ -31,3 +32,4 @@ class Rule(SQLModel, table=True):
     group_description: str = None
     # e.g. The {{ labels.queue }} is more than third full on {{ num_of_alerts }} queue managers
     item_description: str = None
+    require_approve: bool = False

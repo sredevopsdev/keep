@@ -16,6 +16,11 @@ import {
   Field as QueryField,
   RuleGroupTypeAny,
 } from "react-querybuilder";
+import { AlertsFoundBadge } from "./AlertsFoundBadge";
+import { useFormContext } from "react-hook-form";
+import { CorrelationForm } from ".";
+import { TIMEFRAME_UNITS_TO_SECONDS } from "./CorrelationSidebarBody";
+import { useSearchAlerts } from "utils/hooks/useSearchAlerts";
 
 const DEFAULT_OPERATORS = defaultOperators.filter((operator) =>
   [
@@ -230,6 +235,16 @@ export const RuleFields = ({
     return onPropChange(prop, value, [groupIndex, ruleFieldIndex]);
   };
 
+  const { watch } = useFormContext<CorrelationForm>();
+  const timeframeInSeconds = watch("timeUnit") ? TIMEFRAME_UNITS_TO_SECONDS[watch("timeUnit")](
+    +watch("timeAmount")
+  ) : 0;
+
+  const { data: alertsFound = [], isLoading } = useSearchAlerts({
+    query: { combinator: "and", rules: ruleFields },
+    timeframe: timeframeInSeconds,
+  });
+
   return (
     <div key={rule.id} className="bg-gray-100 px-4 py-3 rounded space-y-2">
       {ruleFields.map((ruleField, ruleFieldIndex) => {
@@ -239,48 +254,57 @@ export const RuleFields = ({
             groupsLength === 1 && ruleFields.length < 2;
 
           return (
-            <Field
-              key={ruleField.id}
-              ruleField={ruleField}
-              onRemoveFieldClick={() => onRemoveRuleFieldClick(ruleFieldIndex)}
-              // add the rule field as an available selection
-              avaliableFields={availableFields.concat({
-                label: ruleField.field,
-                name: ruleField.field,
-              })}
-              onFieldChange={(prop, value) =>
-                onFieldChange(prop, value, ruleFieldIndex)
-              }
-              isInputRemovalDisabled={isInputRemovalDisabled}
-            />
+            <div key={ruleFieldIndex}>
+              <div className="mb-2">{ruleFieldIndex > 0 ? "AND" : ""}</div>
+
+              <Field
+                ruleField={ruleField}
+                key={ruleField.id}
+                onRemoveFieldClick={() => onRemoveRuleFieldClick(ruleFieldIndex)}
+                // add the rule field as an available selection
+                avaliableFields={availableFields.concat({
+                  label: ruleField.field,
+                  name: ruleField.field,
+                })}
+                onFieldChange={(prop, value) =>
+                  onFieldChange(prop, value, ruleFieldIndex)
+                }
+                isInputRemovalDisabled={isInputRemovalDisabled}
+              />
+            </div>
           );
         }
 
         return null;
       })}
-      <div className="flex justify-between items-center">
-        <Button
-          onClick={onAddRuleFieldClick}
-          type="button"
-          variant="light"
-          color="orange"
-          disabled={availableFields.length === 0}
-        >
-          Add condition
-        </Button>
 
-        <Button
-          type="button"
-          variant="light"
-          color="red"
-          title={
-            groupsLength <= 1 ? "You must have at least one group" : undefined
-          }
-          disabled={groupsLength <= 1}
-          onClick={onRemoveGroupClick}
-        >
-          Remove group
-        </Button>
+      <div className="flex flex-col">
+        <div className="flex justify-between items-center">
+          <Button
+            onClick={onAddRuleFieldClick}
+            type="button"
+            variant="light"
+            color="orange"
+            disabled={availableFields.length === 0}
+          >
+            Add condition
+          </Button>
+
+          <Button
+            type="button"
+            variant="light"
+            color="red"
+            title={
+              groupsLength <= 1 ? "You must have at least one group" : undefined
+            }
+            disabled={groupsLength <= 1}
+            onClick={onRemoveGroupClick}
+          >
+            Remove group
+          </Button>
+        </div>
+
+        <AlertsFoundBadge alertsFound={alertsFound} isLoading={isLoading} />
       </div>
     </div>
   );

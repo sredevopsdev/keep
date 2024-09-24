@@ -1,14 +1,13 @@
 import { CSSProperties, useEffect, useState } from "react";
 import { Session } from "next-auth";
 import { toast } from "react-toastify";
-import { Trashcan } from "components/icons";
 import { getApiURL } from "utils/apiUrl";
 import { usePresets } from "utils/hooks/usePresets";
 import { AiOutlineSwap } from "react-icons/ai";
 import { usePathname, useRouter } from "next/navigation";
-import { Badge, Icon } from "@tremor/react";
+import { Subtitle } from "@tremor/react";
 import classNames from "classnames";
-import Link from "next/link";
+import { LinkWithIcon } from "../LinkWithIcon";
 import {
   DndContext,
   DragEndEvent,
@@ -22,9 +21,11 @@ import { SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Preset } from "app/alerts/models";
 import { AiOutlineSound } from "react-icons/ai";
+// Using dynamic import to avoid hydration issues with react-player
+import dynamic from 'next/dynamic'
+const ReactPlayer = dynamic(() => import("react-player"), { ssr: false });
 // import css
 import "./CustomPresetAlertLink.css";
-import ReactPlayer from "react-player";
 
 type PresetAlertProps = {
   preset: Preset;
@@ -33,7 +34,6 @@ type PresetAlertProps = {
 };
 
 const PresetAlert = ({ preset, pathname, deletePreset }: PresetAlertProps) => {
-  const [isHovered, setIsHovered] = useState(false);
   const href = `/alerts/${preset.name.toLowerCase()}`;
   const isActive = decodeURIComponent(pathname?.toLowerCase() || "") === href;
 
@@ -49,93 +49,62 @@ const PresetAlert = ({ preset, pathname, deletePreset }: PresetAlertProps) => {
     cursor: isDragging ? "grabbing" : "grab",
   };
 
+  const getIcon = () => {
+    if (preset.should_do_noise_now) {
+      return AiOutlineSound;
+    } else if (preset.is_noisy) {
+      return AiOutlineSound;
+    } else {
+      return AiOutlineSwap;
+    }
+  };
+
   return (
-
-    <li key={preset.id} ref={setNodeRef} style={dragStyle} {...listeners}
-    onMouseEnter={() => setIsHovered(true)}
-    onMouseLeave={() => setIsHovered(false)}
-  >
-    <span
-      className={classNames(
-        "flex items-center space-x-2 text-sm p-1 text-slate-400 font-medium rounded-lg",
-        {
-          "bg-stone-200/50": isActive,
-          "hover:text-orange-400 focus:ring focus:ring-orange-300 group hover:bg-stone-200/50":
-            !isDragging,
-        }
-      )}
+    <li
+      key={preset.id}
+      ref={setNodeRef}
+      style={dragStyle}
+      {...listeners}
     >
-      <Link
-        className={classNames("flex items-center flex-1", {
-          "pointer-events-none cursor-auto": isDragging,
-        })}
-        tabIndex={0}
+      <LinkWithIcon
         href={href}
+        icon={getIcon()}
+        count={preset.alerts_count}
+        isDeletable={true}
+        onDelete={() => deletePreset(preset.id, preset.name)}
+        className={classNames(
+          "flex items-center space-x-2 text-sm p-1 text-slate-400 font-medium rounded-lg",
+          {
+            "bg-stone-200/50": isActive,
+            "hover:text-orange-400 focus:ring focus:ring-orange-300 group hover:bg-stone-200/50":
+              !isDragging,
+          }
+        )}
       >
-        {
-          preset.should_do_noise_now ? (
-            // If we should do noise now, show the pulse-icon
-            <Icon
-              icon={AiOutlineSound}
-              className="pulse-icon hover:text-red-500"
-            />
-          ) : preset.is_noisy ? (
-            // Else if it's just noisy, show the AiOutlineSound icon without pulse
-            <Icon
-              icon={AiOutlineSound}
-              className="text-slate-400 hover:text-red-500"
-            />
-          ) : (
-            // Otherwise, show the default icon
-            <Icon
-              icon={AiOutlineSwap}
-              className={classNames("group-hover:text-orange-400", {
-                "text-orange-400": isActive,
-                "text-slate-400": !isActive,
-              })}
-            />
-          )
-        }
-
-        <span
+        <Subtitle
           className={classNames("truncate max-w-[7.5rem]", {
             "text-orange-400": isActive,
           })}
           title={preset.name}
         >
-          {preset.name}
-        </span>
-      </Link>
-      <div className="flex items-center justify-end flex-1">
-        <Badge
-          className="right-0 z-10"
-          size="xs"
-          color="orange"
-        >
-          {preset.alerts_count}
-        </Badge>
-         <button
-            onClick={() => deletePreset(preset.id, preset.name)}
-            className={`flex items-center text-slate-400 hover:text-red-500 p-0 ${
-              isHovered ? 'ml-2' : ''}`}
-          >
-            <Trashcan className="text-slate-400 hover:text-red-500 group-hover:block hidden h-4 w-4" />
-          </button>
-      </div>
-    </span>
-  </li>
-  );};
-
+          {preset.name.charAt(0).toUpperCase() + preset.name.slice(1)}
+        </Subtitle>
+      </LinkWithIcon>
+    </li>
+  );
+};
 type CustomPresetAlertLinksProps = {
   session: Session;
+  selectedTags: string[];
 };
 
 export const CustomPresetAlertLinks = ({
   session,
+  selectedTags,
 }: CustomPresetAlertLinksProps) => {
   const apiUrl = getApiURL();
 
-  const { useAllPresets, presetsOrderFromLS, setPresetsOrderFromLS} = usePresets();
+  const { useAllPresets, presetsOrderFromLS, setPresetsOrderFromLS } = usePresets();
   const { data: presets = [], mutate: presetsMutator } = useAllPresets({
     revalidateIfStale: false,
     revalidateOnFocus: false,
@@ -145,7 +114,14 @@ export const CustomPresetAlertLinks = ({
   const [presetsOrder, setPresetsOrder] = useState<Preset[]>([]);
 
   // Check for noisy presets and control sound playback
-  const anyNoisyNow = presets.some(preset => preset.should_do_noise_now);
+  const anyNoisyNow = presets.some((preset) => preset.should_do_noise_now);
+
+  const checkValidPreset = (preset: Preset) => {
+    if (!preset.is_private) {
+      return true;
+    }
+    return preset && preset.created_by == session?.user?.email;
+  };
 
   useEffect(() => {
     const filteredLS = presetsOrderFromLS.filter(
@@ -153,11 +129,11 @@ export const CustomPresetAlertLinks = ({
     );
 
     // Combine live presets and local storage order
-    const combinedOrder = presets.reduce<Preset[]>((acc, preset) => {
-      if (!acc.find(p => p.id === preset.id)) {
+    const combinedOrder = presets.reduce<Preset[]>((acc, preset: Preset) => {
+      if (!acc.find((p) => p.id === preset.id)) {
         acc.push(preset);
       }
-      return acc;
+      return acc.filter((preset) => checkValidPreset(preset));
     }, [...filteredLS]);
 
     // Only update state if there's an actual change to prevent infinite loops
@@ -165,8 +141,12 @@ export const CustomPresetAlertLinks = ({
       setPresetsOrder(combinedOrder);
     }
   }, [presets, presetsOrderFromLS]);
-
-
+  // Filter presets based on tags, or return all if no tags are selected
+  const filteredOrderedPresets = selectedTags.length === 0
+    ? presetsOrder
+    : presetsOrder.filter((preset) =>
+        preset.tags.some((tag) => selectedTags.includes(tag.name))
+      );
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -188,7 +168,7 @@ export const CustomPresetAlertLinks = ({
     );
 
     if (isDeleteConfirmed) {
-    const response = await fetch(`${apiUrl}/preset/${presetId}`, {
+      const response = await fetch(`${apiUrl}/preset/${presetId}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${session.accessToken}`,
@@ -246,7 +226,7 @@ export const CustomPresetAlertLinks = ({
       onDragEnd={onDragEnd}
     >
       <SortableContext key="preset-alerts" items={presetsOrder}>
-        {presetsOrder.map((preset) => (
+        {filteredOrderedPresets.map((preset) => (
           <PresetAlert
             key={preset.id}
             preset={preset}

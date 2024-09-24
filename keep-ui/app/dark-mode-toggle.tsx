@@ -1,4 +1,4 @@
-import { Icon, Switch } from "@tremor/react";
+import { Icon, Subtitle, Switch } from "@tremor/react";
 import { useEffect } from "react";
 import { MdDarkMode } from "react-icons/md";
 import { useLocalStorage } from "utils/hooks/useLocalStorage";
@@ -16,7 +16,7 @@ export default function DarkModeToggle() {
     s.setAttribute("id", "nightify");
     s.appendChild(
       document.createTextNode(
-        "html{-webkit-filter:invert(100%) hue-rotate(180deg) contrast(70%) !important; background: #fff;} .line-content {background-color: #fefefe;}"
+        "html{-webkit-filter:invert(100%) hue-rotate(180deg) contrast(80%) !important; background: #fff;} .line-content {background-color: #fefefe;}"
       )
     );
     h.appendChild(s);
@@ -42,18 +42,18 @@ export default function DarkModeToggle() {
   }, [darkMode]);
 
   return (
-    <button
+    <label
+      htmlFor="dark-mode"
       className="flex items-center justify-between space-x-3 w-full text-sm p-1 text-slate-400 hover:bg-stone-200/50 font-medium rounded-lg hover:text-orange-400 focus:ring focus:ring-orange-300 group"
-      onClick={toggleDarkMode}
     >
       <span className="flex items-center justify-between">
         <Icon
-          className="text-slate-400 group-hover:text-orange-400"
+          className="text-black group-hover:text-orange-400"
           icon={MdDarkMode}
         />
-        <span>Dark Mode</span>
+        <Subtitle className="ml-2">Dark Mode</Subtitle>
       </span>
-      <Switch color="orange" checked={darkMode} />
-    </button>
+      <Switch id="dark-mode" name="dark-mode" color="orange" onChange={toggleDarkMode} checked={darkMode} />
+    </label>
   );
 }

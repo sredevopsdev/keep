@@ -2,16 +2,23 @@ name: Tests
 on:
   push:
     paths:
-      - 'keep/**'
+      - "keep/**"
   pull_request:
     paths:
-      - 'keep/**'
-
+      - "keep/**"
+  workflow_dispatch:
+permissions:
+  actions: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: true
+# MySQL server and Elasticsearch for testing
 env:
   PYTHON_VERSION: 3.11
   STORAGE_MANAGER_DIRECTORY: /tmp/storage-manager
   MYSQL_ROOT_PASSWORD: keep
   MYSQL_DATABASE: keep
+  ELASTIC_PASSWORD: keeptests
 
 jobs:
   tests:
@@ -29,6 +36,30 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=3
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+        ports:
+          - 9200:9200
+        env:
+          ELASTIC_PASSWORD: ${{ env.ELASTIC_PASSWORD }}
+          bootstrap.memory_lock: "true"
+          discovery.type: "single-node"
+          ES_JAVA_OPTS: "-Xms2g -Xmx2g"
+          xpack.security.enabled: "true"
+      keycloak:
+        image: us-central1-docker.pkg.dev/keephq/keep/keep-keycloak-test
+        env:
+          KC_DB: dev-mem
+          KC_HTTP_RELATIVE_PATH: /auth
+          KEYCLOAK_ADMIN: keep_kc_admin
+          KEYCLOAK_ADMIN_PASSWORD: keep_kc_admin
+        ports:
+          - 8787:8080
+        options: >-
+          --health-cmd="/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080/auth --realm master --user keep_kc_admin --password keep_kc_admin || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=4
 
     steps:
       - name: Checkout
@@ -62,7 +93,7 @@ jobs:
             sleep 1
           done
           echo "MySQL is up and running!"
-          poetry run coverage run --branch -m pytest
+          poetry run coverage run --branch -m pytest --ignore=tests/e2e_tests/
 
       - name: Convert coverage results to JSON (for CodeCov support)
         run: poetry run coverage json --omit="keep/providers/*"

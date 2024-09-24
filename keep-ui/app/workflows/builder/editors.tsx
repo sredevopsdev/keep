@@ -7,28 +7,27 @@ import {
   Subtitle,
   Icon,
   Button,
+  Switch,
+  Divider,
 } from "@tremor/react";
 import { KeyIcon } from "@heroicons/react/20/solid";
-import { Properties } from "sequential-workflow-designer";
-import {
-  useStepEditor,
-  useGlobalEditor,
-} from "sequential-workflow-designer-react";
 import { Provider } from "app/providers/providers";
 import {
   BackspaceIcon,
-  BellSnoozeIcon,
-  ClockIcon,
   FunnelIcon,
-  HandRaisedIcon,
 } from "@heroicons/react/24/outline";
+import React from "react";
+import useStore, { V2Properties } from "./builder-store";
+import { useEffect, useRef, useState } from "react";
 
 function EditorLayout({ children }: { children: React.ReactNode }) {
   return <div className="flex flex-col m-2.5">{children}</div>;
 }
 
-export function GlobalEditor() {
-  const { properties, setProperty } = useGlobalEditor();
+
+export function GlobalEditorV2({ synced, saveRef }: { synced: boolean, saveRef: React.MutableRefObject<boolean>; }) {
+  const { v2Properties: properties, updateV2Properties: setProperty, selectedNode } = useStore();
+
   return (
     <EditorLayout>
       <Title>Keep Workflow Editor</Title>
@@ -37,27 +36,36 @@ export function GlobalEditor() {
         workflow YAML specifications.
       </Text>
       <Text className="mt-5">
-        Use the toolbox to add steps, conditions and actions to your workflow
-        and click the `Generate` button to compile the workflow / `Deploy`
-        button to deploy the workflow to Keep.
+        Use the edge add button or an empty step (a step with a +) to insert steps, conditions, and actions into your workflow.
+        Then, click the Generate button to compile the workflow or the Deploy button to deploy it to Keep.
       </Text>
-      {WorkflowEditor(properties, setProperty)}
+      <div className="text-right">{synced ? "Synced" : "Not Synced"}</div>
+      <WorkflowEditorV2
+        properties={properties}
+        setProperties={setProperty}
+        selectedNode={selectedNode}
+        saveRef={saveRef}
+      />
     </EditorLayout>
   );
 }
 
+
 interface keepEditorProps {
-  properties: Properties;
-  updateProperty: (key: string, value: any) => void;
+  properties: V2Properties;
+  updateProperty: ((key: string, value: any) => void);
+  providers?: Provider[] | null | undefined;
   installedProviders?: Provider[] | null | undefined;
   providerType?: string;
   type?: string;
+  isV2?: boolean
 }
 
 function KeepStepEditor({
   properties,
   updateProperty,
   installedProviders,
+  providers,
   providerType,
   type,
 }: keepEditorProps) {
@@ -80,6 +88,9 @@ function KeepStepEditor({
   const installedProviderByType = installedProviders?.filter(
     (p) => p.type === providerType
   );
+  const isThisProviderNeedsInstallation = providers?.some(
+    (p) => p.type === providerType && p.config && Object.keys(p.config).length > 0
+  ) ?? false;
 
   const DynamicIcon = (props: any) => (
     <svg
@@ -131,22 +142,22 @@ function KeepStepEditor({
         placeholder="Enter provider name manually"
         onChange={(e: any) => updateProperty("config", e.target.value)}
         className="my-2.5"
-        value={providerConfig}
+        value={providerConfig || ""}
         error={
           providerConfig !== "" &&
           providerConfig !== undefined &&
+          isThisProviderNeedsInstallation &&
           installedProviderByType?.find(
             (p) => p.details?.name === providerConfig
           ) === undefined
         }
-        errorMessage={`${
-          providerConfig &&
-          installedProviderByType?.find(
-            (p) => p.details?.name === providerConfig
-          ) === undefined
+        errorMessage={`${providerConfig && isThisProviderNeedsInstallation &&
+            installedProviderByType?.find(
+              (p) => p.details?.name === providerConfig
+            ) === undefined
             ? "Please note this provider is not installed and you'll need to install it before executing this workflow."
             : ""
-        }`}
+          }`}
       />
       <Text className="my-2.5">Provider Parameters</Text>
       <div>
@@ -156,7 +167,7 @@ function KeepStepEditor({
           placeholder="If Condition"
           onValueChange={(value) => updateProperty("if", value)}
           className="mb-2.5"
-          value={properties?.if as string}
+          value={properties?.if || "" as string}
         />
       </div>
       {uniqueParams
@@ -174,7 +185,7 @@ function KeepStepEditor({
                 placeholder={key}
                 onChange={propertyChanged}
                 className="mb-2.5"
-                value={currentPropertyValue}
+                value={currentPropertyValue || ""}
               />
             </div>
           );
@@ -243,19 +254,25 @@ function KeepForeachEditor({ properties, updateProperty }: keepEditorProps) {
   );
 }
 
-function WorkflowEditor(properties: Properties, updateProperty: any) {
-  /**
-   * TODO: support generate, add more triggers and complex filters
-   *  Need to think about UX for this
-   */
-  const propertyKeys = Object.keys(properties).filter(
-    (k) => k !== "isLocked" && k !== "id"
-  );
+function WorkflowEditorV2({
+  properties,
+  setProperties,
+  selectedNode,
+  saveRef
+}: {
+  properties: V2Properties;
+  setProperties: (updatedProperties: V2Properties) => void;
+  selectedNode: string | null;
+  saveRef: React.MutableRefObject<boolean>;
+}) {
 
   const updateAlertFilter = (filter: string, value: string) => {
-    const currentFilters = properties.alert as {};
+    const currentFilters = properties.alert || {};
     const updatedFilters = { ...currentFilters, [filter]: value };
-    updateProperty("alert", updatedFilters);
+    setProperties({ ...properties, alert: updatedFilters });
+    if (saveRef.current) {
+      saveRef.current = false
+    }
   };
 
   const addFilter = () => {
@@ -265,176 +282,281 @@ function WorkflowEditor(properties: Properties, updateProperty: any) {
     }
   };
 
-  const addTrigger = (trigger: "manual" | "interval" | "alert") => {
-    updateProperty(
-      trigger,
-      trigger === "alert" ? { source: "" } : trigger === "manual" ? "true" : ""
-    );
-  };
-
   const deleteFilter = (filter: string) => {
-    const currentFilters = properties.alert as any;
+    const currentFilters = { ...properties.alert };
     delete currentFilters[filter];
-    updateProperty("alert", currentFilters);
+    setProperties({ ...properties, alert: currentFilters });
+    if (saveRef.current) {
+      saveRef.current = false
+    }
   };
 
+  const handleChange = (key: string, value: string) => {
+    setProperties({
+      ...properties,
+      [key]: value,
+    });
+    if (saveRef.current) {
+      saveRef.current = false
+    }
+  }
+
+  const propertyKeys = Object.keys(properties).filter(
+    (k) => k !== "isLocked" && k !== "id"
+  );
+  let renderDivider = false;
   return (
     <>
       <Title className="mt-2.5">Workflow Settings</Title>
-      <div className="w-1/2">
-        {Object.keys(properties).includes("manual") ? null : (
-          <Button
-            onClick={() => addTrigger("manual")}
-            className="mb-1"
-            size="xs"
-            color="orange"
-            variant="light"
-            icon={HandRaisedIcon}
-          >
-            Add Manual Trigger
-          </Button>
-        )}
-        {Object.keys(properties).includes("interval") ? null : (
-          <Button
-            onClick={() => addTrigger("interval")}
-            className="mb-1"
-            size="xs"
-            color="orange"
-            variant="light"
-            icon={ClockIcon}
-          >
-            Add Interval Trigger
-          </Button>
-        )}
-        {Object.keys(properties).includes("alert") ? null : (
-          <Button
-            onClick={() => addTrigger("alert")}
-            className="mb-1"
-            size="xs"
-            color="orange"
-            variant="light"
-            icon={BellSnoozeIcon}
-          >
-            Add Alert Trigger
-          </Button>
-        )}
-      </div>
       {propertyKeys.map((key, index) => {
+        const isTrigger = ["manual", "alert", 'interval', 'incident'].includes(key);
+        renderDivider = isTrigger && key ===  selectedNode ? !renderDivider : false;
         return (
-          <div key={index}>
-            <Text className="capitalize mt-2.5">{key}</Text>
-            {key === "manual" ? (
-              <div key={key}>
-                <input
-                  type="checkbox"
-                  checked={properties[key] === "true"}
-                  onChange={(e) =>
-                    updateProperty(key, e.target.checked ? "true" : "false")
-                  }
-                />
-              </div>
-            ) : key === "alert" ? (
-              <>
-                <div className="w-1/2">
-                  <Button
-                    onClick={addFilter}
-                    size="xs"
-                    className="ml-1 mt-1"
-                    variant="light"
-                    color="gray"
-                    icon={FunnelIcon}
-                  >
-                    Add Filter
-                  </Button>
-                </div>
-                {properties.alert &&
-                  Object.keys(properties.alert as {}).map((filter) => {
-                    return (
+          <div key={key}>
+            {renderDivider && <Divider />}
+            {((key === selectedNode) || (!isTrigger)) && <Text className="capitalize">{key}</Text>}
+
+            {(() => {
+              switch (key) {
+                case "manual":
+                  return (
+                    selectedNode === "manual" && (
+                      <div key={key}>
+                        <input
+                          type="checkbox"
+                          checked={true}
+                          onChange={(e) =>
+                            handleChange(key, e.target.checked ? "true" : "false")
+                          }
+                          disabled={true}
+                        />
+                      </div>
+                    )
+                  );
+
+                case "alert":
+                  return (
+                    selectedNode === "alert" && (
                       <>
-                        <Subtitle className="mt-2.5">{filter}</Subtitle>
-                        <div className="flex items-center mt-1" key={filter}>
-                          <TextInput
-                            key={filter}
-                            placeholder={`Set alert ${filter}`}
-                            onChange={(e: any) =>
-                              updateAlertFilter(filter, e.target.value)
-                            }
-                            value={(properties.alert as any)[filter] as string}
-                          />
-                          <Icon
-                            icon={BackspaceIcon}
-                            className="cursor-pointer"
-                            color="red"
-                            tooltip={`Remove ${filter} filter`}
-                            onClick={() => deleteFilter(filter)}
-                          />
+                        <div className="w-1/2">
+                          <Button
+                            onClick={addFilter}
+                            size="xs"
+                            className="ml-1 mt-1"
+                            variant="light"
+                            color="gray"
+                            icon={FunnelIcon}
+                          >
+                            Add Filter
+                          </Button>
                         </div>
+                        {properties.alert &&
+                          Object.keys(properties.alert as {}).map((filter) => {
+                            return (
+                              <>
+                                <Subtitle className="mt-2.5">{filter}</Subtitle>
+                                <div className="flex items-center mt-1" key={filter}>
+                                  <TextInput
+                                    key={filter}
+                                    placeholder={`Set alert ${filter}`}
+                                    onChange={(e: any) =>
+                                      updateAlertFilter(filter, e.target.value)
+                                    }
+                                    value={(properties.alert as any)[filter] || "" as string}
+                                  />
+                                  <Icon
+                                    icon={BackspaceIcon}
+                                    className="cursor-pointer"
+                                    color="red"
+                                    tooltip={`Remove ${filter} filter`}
+                                    onClick={() => deleteFilter(filter)}
+                                  />
+                                </div>
+                              </>
+                            );
+                          })}
                       </>
-                    );
-                  })}
-              </>
-            ) : (
-              <TextInput
-                placeholder={`Set the ${key}`}
-                onChange={(e: any) => updateProperty(key, e.target.value)}
-                value={properties[key] as string}
-              />
-            )}
-          </div>
-        );
+                    )
+                  );
+
+                case "incident":
+                  return selectedNode === 'incident' && <>
+                    <Subtitle className="mt-2.5">Incident events</Subtitle>
+                    {Array("created", "updated", "deleted").map((event) =>
+                      <div key={`incident-${event}`} className="flex">
+                        <Switch
+                          id={event}
+                          checked={properties.incident.events?.indexOf(event) > -1}
+                          onChange={() => {
+                            let events = properties.incident.events || [];
+                            if (events.indexOf(event) > -1) {
+                              events = (events as string[]).filter(e => e !== event)
+                              setProperties({ ...properties, [key]: {events: events } })
+                            } else {
+                              events.push(event);
+                              setProperties({ ...properties, [key]: {events: events} })
+                            }
+                          }}
+                          color={"orange"}
+                        />
+                        <label htmlFor={`incident-${event}`} className="text-sm text-gray-500">
+                          <Text>{event}</Text>
+                        </label>
+                      </div>
+                    )}
+                  </>;
+                case "interval":
+                  return selectedNode === "interval" && (<TextInput
+                    placeholder={`Set the ${key}`}
+                    onChange={(e: any) =>
+                      handleChange(key, e.target.value)
+                    }
+                    value={properties[key] || ""as string}
+                  />);
+                case "disabled":
+                  return (
+                    <div key={key}>
+                      <input
+                        type="checkbox"
+                        checked={properties[key] === "true"}
+                        onChange={(e) =>
+                          handleChange(key, e.target.checked ? "true" : "false")
+                        }
+                      />
+                    </div>
+                  );
+                default:
+                  return (
+                    <TextInput
+                      placeholder={`Set the ${key}`}
+                      onChange={(e: any) =>
+                        handleChange(key, e.target.value)
+                      }
+                      value={properties[key] || ""as string}
+                                  />
+                              );
+                      }
+                  })()}
+              </div>
+          );
       })}
     </>
   );
 }
 
-export default function StepEditor({
+
+
+export function StepEditorV2({
+  providers,
   installedProviders,
+  setSynced,
+  saveRef
 }: {
+  providers: Provider[] | undefined | null;
   installedProviders?: Provider[] | undefined | null;
+  setSynced: (sync: boolean) => void;
+  saveRef: React.MutableRefObject<boolean>;
 }) {
-  const { type, componentType, name, setName, properties, setProperty } =
-    useStepEditor();
+  const [formData, setFormData] = useState<{ name?: string; properties?: V2Properties, type?: string }>({});
+  const {
+    selectedNode,
+    updateSelectedNodeData,
+    getNodeById,
+  } = useStore();
 
-  function onNameChanged(e: any) {
-    setName(e.target.value);
-  }
+  const deployRef = useRef<HTMLInputElement>(null);
 
-  const providerType = type.split("-")[1];
+  useEffect(() => {
+    if (selectedNode) {
+      const { data } = getNodeById(selectedNode) || {};
+      const { name, type, properties } = data || {};
+      setFormData({ name, type, properties });
+    }
+  }, [selectedNode, getNodeById]);
+
+  if (!selectedNode) return null;
+
+  const providerType = formData?.type?.split("-")[1];
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+    setSynced(false);
+  };
+
+  const handlePropertyChange = (key: string, value: any) => {
+    setFormData({
+      ...formData,
+      properties: { ...formData.properties, [key]: value },
+    });
+    setSynced(false);
+    if (saveRef.current) {
+      saveRef.current = false;
+    }
+  };
+
+
+  const handleSubmit = () => {
+    // Finalize the changes before saving
+    updateSelectedNodeData('name', formData.name);
+    updateSelectedNodeData('properties', formData.properties);
+    setSynced(false);
+    if (saveRef && deployRef?.current?.checked) {
+      saveRef.current = true;
+    }
+  };
+
+  const type = formData ? formData.type?.includes("step-") || formData.type?.includes("action-") : "";
 
   return (
     <EditorLayout>
-      <Title className="capitalize">{providerType} Editor</Title>
+      <Title className="capitalize">{providerType}1 Editor</Title>
       <Text className="mt-1">Unique Identifier</Text>
       <TextInput
         className="mb-2.5"
         icon={KeyIcon}
-        value={name}
-        onChange={onNameChanged}
+        name="name"
+        value={formData.name || ''}
+        onChange={handleInputChange}
       />
-      {type.includes("step-") || type.includes("action-") ? (
+      {type && formData.properties ? (
         <KeepStepEditor
-          properties={properties}
-          updateProperty={setProperty}
+          properties={formData.properties}
+          updateProperty={handlePropertyChange}
+          providers={providers}
           installedProviders={installedProviders}
           providerType={providerType}
-          type={type}
+          type={formData.type}
         />
-      ) : type === "condition-threshold" ? (
+      ) : formData.type === "condition-threshold" ? (
         <KeepThresholdConditionEditor
-          properties={properties}
-          updateProperty={setProperty}
+          properties={formData.properties!}
+          updateProperty={handlePropertyChange}
         />
-      ) : type.includes("foreach") ? (
+      ) : formData.type?.includes("foreach") ? (
         <KeepForeachEditor
-          properties={properties}
-          updateProperty={setProperty}
+          properties={formData.properties!}
+          updateProperty={handlePropertyChange}
         />
-      ) : type === "condition-assert" ? (
+      ) : formData.type === "condition-assert" ? (
         <KeepAssertConditionEditor
-          properties={properties}
-          updateProperty={setProperty}
+          properties={formData.properties!}
+          updateProperty={handlePropertyChange}
         />
       ) : null}
+      <div>
+        <Text className="capitalize">Deploy</Text>
+        <input
+          ref={deployRef}
+          type="checkbox"
+          defaultChecked
+        />
+      </div>
+      <button
+        className="sticky bottom-[-10px] mt-4 bg-orange-500 text-white p-2 rounded"
+        onClick={handleSubmit}
+      >
+        Save & Deploy
+      </button>
     </EditorLayout>
   );
 }

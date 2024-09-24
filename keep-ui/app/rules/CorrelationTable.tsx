@@ -1,6 +1,7 @@
 import {
+  Badge,
   Button,
-  Card,
+  Card, Icon,
   Subtitle,
   Table,
   TableBody,
@@ -27,6 +28,15 @@ import { DefaultRuleGroupType, parseCEL } from "react-querybuilder";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormattedQueryCell } from "./FormattedQueryCell";
 import { DeleteRuleCell } from "./CorrelationSidebar/DeleteRule";
+import {PlusIcon} from "@radix-ui/react-icons";
+
+
+const TIMEFRAME_UNITS_FROM_SECONDS= {
+  seconds: (amount: number) => amount,
+  minutes: (amount: number) => amount / 60,
+  hours: (amount: number) => amount / 3600,
+  days: (amount: number) => amount  / 86400,
+} as const;
 
 const columnHelper = createColumnHelper<Rule>();
 
@@ -57,13 +67,17 @@ export const CorrelationTable = ({ rules }: CorrelationTableProps) => {
             ],
       };
 
+      const timeunit = selectedRule.timeunit ?? "seconds";
+
       return {
         name: selectedRule.name,
         description: selectedRule.group_description ?? "",
-        timeAmount: selectedRule.timeframe,
-        timeUnit: "seconds",
+        timeAmount: TIMEFRAME_UNITS_FROM_SECONDS[timeunit](selectedRule.timeframe),
+        timeUnit: timeunit,
         groupedAttributes: selectedRule.grouping_criteria,
+        requireApprove: selectedRule.require_approve,
         query: queryInGroup,
+        incidents: selectedRule.incidents,
       };
     }
 
@@ -94,18 +108,29 @@ export const CorrelationTable = ({ rules }: CorrelationTableProps) => {
       columnHelper.accessor("name", {
         header: "Correlation Name",
       }),
-      columnHelper.display({
-        id: "events",
-        header: "Events",
-      }),
-      columnHelper.display({
-        id: "alerts",
-        header: "Alerts",
-      }),
       columnHelper.accessor("definition_cel", {
         header: "Description",
         cell: (context) => (
           <FormattedQueryCell query={parseCEL(context.getValue())} />
+        ),
+      }),
+      columnHelper.accessor("grouping_criteria", {
+        header: "Grouped by",
+        cell: (context) => (
+          context.getValue().map((group, index) =>
+            <>
+              <Badge color="orange" key={group}>{group}</Badge>
+              {context.getValue().length !== index + 1 && (
+              <Icon  icon={PlusIcon} size="xs" color="slate" />
+            )}
+            </>
+          )
+        ),
+      }),
+      columnHelper.accessor("incidents", {
+        header: "Incidents",
+        cell: (context) => (
+          context.getValue()
         ),
       }),
       columnHelper.display({
@@ -130,8 +155,7 @@ export const CorrelationTable = ({ rules }: CorrelationTableProps) => {
             Correlations <span className="text-gray-400">({rules.length})</span>
           </Title>
           <Subtitle className="text-gray-400">
-            Dynamically incentivize cross-unit models without best-of-breed
-            models.
+            Manually setup flexible rules for alert to incident correlation
           </Subtitle>
         </div>
         <Button color="orange" onClick={() => onCorrelationClick()}>
